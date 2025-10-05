@@ -1,60 +1,59 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
 	"strconv"
+
 	"PXMarkMapBackEnd/pkg/database"
-	"PXMarkMapBackEnd/pkg/google"
+	"PXMarkMapBackEnd/pkg/scheduler"
+	"PXMarkMapBackEnd/pkg/server"
+	"PXMarkMapBackEnd/pkg/sync"
 )
 
-// func main() {
-// 	// 先抓 Sheet
-// 	storeMap, err := google.LoadAndOrganizeSheets()
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-
-// 	// 測試：對每個店名去 Google Places 查資料
-// 	for _, store := range storeMap {
-// 		result, err := google.SearchPlaceByName(store.StoreName)
-// 		if err != nil {
-// 			log.Printf("查詢 %s 失敗: %v\n", store.StoreName, err)
-// 			continue
-// 		}
-
-// 		if len(result.Candidates) > 0 {
-// 			place := result.Candidates[0]
-// 			fmt.Printf("店名: %s\n地址: %s\n經緯度: (%f, %f)\nPlaceID: %s\n\n",
-// 				place.Name,
-// 				place.Address,
-// 				place.Geometry.Location.Lat,
-// 				place.Geometry.Location.Lng,
-// 				place.PlaceID,
-// 			)
-// 		} else {
-// 			fmt.Printf("店名: %s → 找不到資料\n", store.StoreName)
-// 		}
-// 	}
-// }
 func main() {
-	// 步驟 1: 從 Google Sheets 讀取資料
-	log.Println("=== 開始讀取 Google Sheets 資料 ===")
-	storeMap, err := google.LoadAndOrganizeSheets()
-	if err != nil {
-		log.Fatalf("讀取 Sheets 失敗: %v", err)
-	}
-	log.Printf("成功讀取 %d 個店家\n", len(storeMap))
-
-	// 步驟 2: 使用 Places API 搜尋地點資訊
-	log.Println("\n=== 開始搜尋店家地點資訊 ===")
-	if err := google.EnrichStoresWithPlaceData(storeMap); err != nil {
-		log.Printf("搜尋地點資訊時發生錯誤: %v", err)
+	// 取得命令參數
+	if len(os.Args) < 2 {
+		printUsage()
+		os.Exit(1)
 	}
 
-	// 步驟 3: 連接資料庫
-	log.Println("\n=== 連接資料庫 ===")
+	command := os.Args[1]
+
+	// 連接資料庫
+	db := connectDatabase()
+	defer db.Close()
+
+	// 根據命令執行不同功能
+	switch command {
+	case "sync":
+		// 手動執行同步
+		handleSync(db)
+
+	case "serve":
+		// 啟動 API 伺服器
+		handleServe(db)
+
+	case "schedule":
+		// 啟動排程器
+		handleSchedule(db)
+
+	case "serve-schedule":
+		// API + 排程一起執行
+		handleServeWithSchedule(db)
+
+	default:
+		fmt.Printf("未知的命令: %s\n", command)
+		printUsage()
+		os.Exit(1)
+	}
+}
+
+// connectDatabase 連接資料庫
+func connectDatabase() *sql.DB {
+	log.Println("=== 連接資料庫 ===")
 	dbPort, _ := strconv.Atoi(getEnv("DB_PORT", "5432"))
 	dbConfig := database.DBConfig{
 		Host:     getEnv("DB_HOST", "localhost"),
@@ -68,115 +67,101 @@ func main() {
 	if err != nil {
 		log.Fatalf("無法連接資料庫: %v", err)
 	}
-	defer db.Close()
 
-	// 步驟 4: 轉換資料格式並儲存到資料庫
-	log.Println("\n=== 儲存資料到資料庫 ===")
-	stores := convertToStoreInfo(storeMap)
-	if err := database.SaveStores(db, stores); err != nil {
-		log.Fatalf("儲存資料失敗: %v", err)
-	}
-
-	// 步驟 5: 查詢並顯示近三天的出貨資料
-	log.Println("\n=== 查詢近三天出貨資料 ===")
-	recentShipments, err := database.GetRecentShipments(db, 3)
-	if err != nil {
-		log.Fatalf("查詢失敗: %v", err)
-	}
-
-	// 整理顯示結果
-	displayResults(recentShipments)
-
-	fmt.Println("\n=== 完成 ===")
+	return db
 }
 
-// convertToStoreInfo 將 google.StoreData 轉換為 database.StoreInfo
-func convertToStoreInfo(storeMap map[string]*google.StoreData) []database.StoreInfo {
-	var stores []database.StoreInfo
-
-	for _, data := range storeMap {
-		// 轉換秋葵出貨紀錄
-		var okraShipments []database.ShipmentInfo
-		for _, s := range data.OkraShipments {
-			okraShipments = append(okraShipments, database.ShipmentInfo{
-				Date: s.Date,
-				Qty:  s.Qty,
-			})
-		}
-
-		// 轉換絲瓜出貨紀錄
-		var gourdShipments []database.ShipmentInfo
-		for _, s := range data.SpongeGourdShipments {
-			gourdShipments = append(gourdShipments, database.ShipmentInfo{
-				Date: s.Date,
-				Qty:  s.Qty,
-			})
-		}
-
-		stores = append(stores, database.StoreInfo{
-			StoreName:        data.StoreName,
-			PlaceID:          data.PlaceID,
-			FormattedAddress: data.FormattedAddress,
-			Latitude:         data.Latitude,
-			Longitude:        data.Longitude,
-			OkraShipments:    okraShipments,
-			GourdShipments:   gourdShipments,
-		})
+// handleSync 處理手動同步
+func handleSync(db *sql.DB) {
+	log.Println("執行手動同步...")
+	
+	if err := sync.SyncData(db); err != nil {
+		log.Fatalf("同步失敗: %v", err)
 	}
 
-	return stores
+	log.Println("同步完成！")
 }
 
-// displayResults 整理並顯示查詢結果
-func displayResults(results []map[string]interface{}) {
-	if len(results) == 0 {
-		fmt.Println("近三天沒有出貨紀錄")
-		return
+// handleServe 處理 API 伺服器
+func handleServe(db *sql.DB) {
+	port := getEnv("API_PORT", "8080")
+	corsOrigins := getEnv("CORS_ORIGINS", "*")
+	recentDays, _ := strconv.Atoi(getEnv("RECENT_DAYS", "3"))
+	
+	srv := server.NewServer(db, port, corsOrigins, recentDays)
+
+	log.Println("啟動 API 伺服器模式")
+	if err := srv.Start(); err != nil {
+		log.Fatalf("API 伺服器啟動失敗: %v", err)
 	}
+}
 
-	// 按店家分組顯示
-	storeGroup := make(map[string][]map[string]interface{})
-	for _, record := range results {
-		storeName := record["store_name"].(string)
-		storeGroup[storeName] = append(storeGroup[storeName], record)
+// handleSchedule 處理排程器
+func handleSchedule(db *sql.DB) {
+	log.Println("啟動排程器模式")
+
+	// 方式 1: 每隔固定時間執行（例如每 1 小時）
+	// interval := 1 * time.Hour
+	// s := scheduler.NewScheduler(db, interval)
+	// s.Start()
+
+	// 方式 2: 每天固定時間執行（例如每天凌晨 2:00）
+	s := scheduler.NewScheduler(db, 0)
+	s.StartDaily(2, 0) // 每天 02:00 執行
+}
+
+// handleServeWithSchedule API + 排程一起執行
+func handleServeWithSchedule(db *sql.DB) {
+	log.Println("啟動 API 伺服器 + 排程器模式")
+
+	// 啟動排程器（在背景執行）
+	go func() {
+		s := scheduler.NewScheduler(db, 0)
+		s.StartDaily(2, 0) // 每天 02:00 執行
+	}()
+
+	// 啟動 API 伺服器（主執行緒）
+	port := getEnv("API_PORT", "8080")
+	corsOrigins := getEnv("CORS_ORIGINS", "*")
+	recentDays, _ := strconv.Atoi(getEnv("RECENT_DAYS", "3"))
+	srv := server.NewServer(db, port, corsOrigins, recentDays)
+	
+	if err := srv.Start(); err != nil {
+		log.Fatalf("API 伺服器啟動失敗: %v", err)
 	}
+}
 
-	for storeName, records := range storeGroup {
-		fmt.Printf("\n【%s】\n", storeName)
+// printUsage 印出使用說明
+func printUsage() {
+	fmt.Println(`
+PXMarkMap Backend - 使用說明
 
-		// 顯示地址資訊（只需顯示一次）
-		if len(records) > 0 {
-			fmt.Printf("  地址: %s\n", records[0]["address"])
-			fmt.Printf("  座標: %.6f, %.6f\n", records[0]["latitude"], records[0]["longitude"])
-		}
+命令:
+  sync              立即執行一次資料同步
+  serve             啟動 API 伺服器
+  schedule          啟動排程器（每天自動同步）
+  serve-schedule    啟動 API 伺服器 + 排程器
 
-		// 分類顯示秋葵和絲瓜
-		okraShipments := []map[string]interface{}{}
-		gourdShipments := []map[string]interface{}{}
+範例:
+  go run main.go sync              # 手動同步資料
+  go run main.go serve             # 啟動 API (http://localhost:8080)
+  go run main.go schedule          # 啟動排程器
+  go run main.go serve-schedule    # API + 排程一起跑
 
-		for _, record := range records {
-			productType := record["product_type"].(string)
-			if productType == "秋葵" {
-				okraShipments = append(okraShipments, record)
-			} else if productType == "產銷絲瓜" {
-				gourdShipments = append(gourdShipments, record)
-			}
-		}
-
-		if len(okraShipments) > 0 {
-			fmt.Println("\n  📦 近三天秋葵出貨:")
-			for _, s := range okraShipments {
-				fmt.Printf("    %s: %s\n", s["shipment_date"], s["quantity"])
-			}
-		}
-
-		if len(gourdShipments) > 0 {
-			fmt.Println("\n  📦 近三天絲瓜出貨:")
-			for _, s := range gourdShipments {
-				fmt.Printf("    %s: %s\n", s["shipment_date"], s["quantity"])
-			}
-		}
-	}
+環境變數（.env）:
+  GOOGLE_SHEET_ID          Google Sheets ID
+  GOOGLE_SHEET_GIDS        GID 列表（逗號分隔）
+  GOOGLE_SHEET_NAMES       Sheet 名稱（逗號分隔）
+  GOOGLE_PLACES_API_KEY    Google Places API Key
+  DB_HOST                  資料庫主機
+  DB_PORT                  資料庫埠號
+  DB_USER                  資料庫使用者
+  DB_PASSWORD              資料庫密碼
+  DB_NAME                  資料庫名稱
+  API_PORT                 API 伺服器埠號（預設 8080）
+  CORS_ORIGINS             CORS 允許的來源（預設 *，可設定如 http://localhost:3000）
+  RECENT_DAYS              查詢近幾天的出貨資料（預設 3）
+	`)
 }
 
 // getEnv 取得環境變數，如果不存在則使用預設值
