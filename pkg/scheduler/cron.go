@@ -43,13 +43,13 @@ func (s *Scheduler) Start() {
 
 // runSync 執行同步任務
 func (s *Scheduler) runSync() {
-	log.Println("\n 排程任務觸發")
-	log.Printf("執行時間: %s", time.Now().Format("2006-01-02 15:04:05"))
+	log.Println("\n排程任務觸發")
+	log.Printf("⏱ 執行時間: %s", time.Now().Format("2006-01-02 15:04:05"))
 
 	if err := sync.SyncData(s.DB); err != nil {
 		log.Printf("同步失敗: %v", err)
 	} else {
-		log.Println("✓ 排程同步完成")
+		log.Println("排程同步完成")
 	}
 }
 
@@ -66,7 +66,7 @@ func (s *Scheduler) StartDaily(hour, minute int) {
 		nextRun = nextRun.Add(24 * time.Hour)
 	}
 
-	log.Printf("下次執行時間: %s", nextRun.Format("2006-01-02 15:04:05"))
+	log.Printf("⏱ 下次執行時間: %s", nextRun.Format("2006-01-02 15:04:05"))
 
 	// 等待到執行時間
 	time.Sleep(time.Until(nextRun))

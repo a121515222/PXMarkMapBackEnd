@@ -100,24 +100,52 @@ func handleServe(db *sql.DB) {
 func handleSchedule(db *sql.DB) {
 	log.Println("啟動排程器模式")
 
+	// 從環境變數讀取排程時間
+	scheduleHour, _ := strconv.Atoi(getEnv("SCHEDULE_HOUR", "0"))
+	scheduleMinute, _ := strconv.Atoi(getEnv("SCHEDULE_MINUTE", "0"))
+
+	// 驗證時間範圍
+	if scheduleHour < 0 || scheduleHour > 23 {
+		log.Printf("無效的小時設定 %d，使用預設值 2", scheduleHour)
+		scheduleHour = 2
+	}
+	if scheduleMinute < 0 || scheduleMinute > 59 {
+		log.Printf("無效的分鐘設定 %d，使用預設值 0", scheduleMinute)
+		scheduleMinute = 0
+	}
+
 	// 方式 1: 每隔固定時間執行（例如每 1 小時）
 	// interval := 1 * time.Hour
 	// s := scheduler.NewScheduler(db, interval)
 	// s.Start()
 
-	// 方式 2: 每天固定時間執行（例如每天凌晨 2:00）
+	// 方式 2: 每天固定時間執行
 	s := scheduler.NewScheduler(db, 0)
-	s.StartDaily(2, 0) // 每天 02:00 執行
+	s.StartDaily(scheduleHour, scheduleMinute)
 }
 
 // handleServeWithSchedule API + 排程一起執行
 func handleServeWithSchedule(db *sql.DB) {
 	log.Println("啟動 API 伺服器 + 排程器模式")
 
+	// 從環境變數讀取排程時間
+	scheduleHour, _ := strconv.Atoi(getEnv("SCHEDULE_HOUR", "2"))
+	scheduleMinute, _ := strconv.Atoi(getEnv("SCHEDULE_MINUTE", "0"))
+
+	// 驗證時間範圍
+	if scheduleHour < 0 || scheduleHour > 23 {
+		log.Printf("無效的小時設定 %d，使用預設值 2", scheduleHour)
+		scheduleHour = 2
+	}
+	if scheduleMinute < 0 || scheduleMinute > 59 {
+		log.Printf("無效的分鐘設定 %d，使用預設值 0", scheduleMinute)
+		scheduleMinute = 0
+	}
+
 	// 啟動排程器（在背景執行）
 	go func() {
 		s := scheduler.NewScheduler(db, 0)
-		s.StartDaily(2, 0) // 每天 02:00 執行
+		s.StartDaily(scheduleHour, scheduleMinute)
 	}()
 
 	// 啟動 API 伺服器（主執行緒）
@@ -127,7 +155,7 @@ func handleServeWithSchedule(db *sql.DB) {
 	srv := server.NewServer(db, port, corsOrigins, recentDays)
 	
 	if err := srv.Start(); err != nil {
-		log.Fatalf("API 伺服器啟動失敗: %v", err)
+		log.Fatalf("❌ API 伺服器啟動失敗: %v", err)
 	}
 }
 
@@ -161,6 +189,8 @@ PXMarkMap Backend - 使用說明
   API_PORT                 API 伺服器埠號（預設 8080）
   CORS_ORIGINS             CORS 允許的來源（預設 *，可設定如 http://localhost:3000）
   RECENT_DAYS              查詢近幾天的出貨資料（預設 3）
+  SCHEDULE_HOUR            排程執行的小時（0-23，預設 2）
+  SCHEDULE_MINUTE          排程執行的分鐘（0-59，預設 0）
 	`)
 }
 
