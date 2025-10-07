@@ -157,7 +157,11 @@ func runGinServer(db *sql.DB) {
 
 	// /api/shopeMap
 	router.GET("/api/shopeMap", func(c *gin.Context) {
-		data, err := database.GetRecentShipments(db, 3)
+		recentDays, err := strconv.Atoi(getEnv("RECENT_DAYS", "5"))
+		if err != nil {
+		recentDays = 5 // 若轉換失敗，預設為 5
+		}
+		data, err := database.GetRecentShipments(db, recentDays)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
