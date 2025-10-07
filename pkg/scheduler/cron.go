@@ -92,30 +92,34 @@ func (s *Scheduler) StartDaily(hour, minute int) {
 		log.Printf("[INFO] 上次同步時間: %s", lastRun.Format("2006-01-02 15:04:05"))
 	}
 
-	// 計算下次執行時間
-	now := time.Now()
-	nextRun := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
-	
-	// 如果今天的執行時間已過，設定為明天
-	if nextRun.Before(now) {
-		nextRun = nextRun.Add(24 * time.Hour)
-	}
+	for {
+		now := time.Now()
+		nextRun := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
 
-	log.Printf("[INFO] 下次執行時間: %s", nextRun.Format("2006-01-02 15:04:05"))
-	log.Printf("[INFO] 等待時間: %v", time.Until(nextRun).Round(time.Second))
+		if now.After(nextRun) {
+			// 若已超過今日設定時間 → 立即執行一次
+			log.Println("[INFO] 已超過今日設定時間，立即執行一次同步")
+			s.runSync()
 
-	// 等待到執行時間
-	time.Sleep(time.Until(nextRun))
+			// 再等到明天相同時間
+			nextRun = nextRun.Add(24 * time.Hour)
+		} else {
+			// 等待到今日的執行時間
+			waitDuration := time.Until(nextRun)
+			log.Printf("[INFO] 下次執行時間: %s", nextRun.Format("2006-01-02 15:04:05"))
+			log.Printf("[INFO] 等待時間: %v", waitDuration.Round(time.Second))
+			time.Sleep(waitDuration)
 
-	// 執行第一次
-	s.runSync()
+			// 到達設定時間 → 執行一次
+			s.runSync()
 
-	// 之後每 24 小時執行一次
-	ticker := time.NewTicker(24 * time.Hour)
-	defer ticker.Stop()
+			// 等待明天
+			nextRun = nextRun.Add(24 * time.Hour)
+		}
 
-	for range ticker.C {
-		s.runSync()
+		// 每次循環等待一天
+		log.Printf("[INFO] 下一輪同步預定於: %s", nextRun.Format("2006-01-02 15:04:05"))
+		time.Sleep(time.Until(nextRun))
 	}
 }
 

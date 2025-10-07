@@ -85,7 +85,7 @@ func handleServe(db *sql.DB) {
 // handleSchedule 啟動排程器
 func handleSchedule(db *sql.DB) {
 	log.Println("[INFO] 啟動排程器模式")
-	scheduleHour, _ := strconv.Atoi(getEnv("SCHEDULE_HOUR", "2"))
+	scheduleHour, _ := strconv.Atoi(getEnv("SCHEDULE_HOUR", "0"))
 	scheduleMinute, _ := strconv.Atoi(getEnv("SCHEDULE_MINUTE", "0"))
 
 	s := scheduler.NewScheduler(db, 0)
@@ -96,7 +96,7 @@ func handleSchedule(db *sql.DB) {
 func handleServeWithSchedule(db *sql.DB) {
 	log.Println("[INFO] 啟動 API + 排程器模式")
 
-	scheduleHour, _ := strconv.Atoi(getEnv("SCHEDULE_HOUR", "2"))
+	scheduleHour, _ := strconv.Atoi(getEnv("SCHEDULE_HOUR", "0"))
 	scheduleMinute, _ := strconv.Atoi(getEnv("SCHEDULE_MINUTE", "0"))
 
 	// 啟動排程器
