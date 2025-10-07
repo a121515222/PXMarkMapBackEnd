@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"github.com/joho/godotenv"
 )
 
 // 出貨紀錄
@@ -21,7 +20,7 @@ type StoreData struct {
 	StoreName            string
 	OkraShipments        []Shipment
 	SpongeGourdShipments []Shipment
-	// 新增地點資訊
+	// 地點資訊
 	PlaceID          string
 	FormattedAddress string
 	Latitude         float64
@@ -57,10 +56,6 @@ func LoadSheetByGID(sheetID, gid string) ([][]string, error) {
 
 // 抓所有 sheet 並整理
 func LoadAndOrganizeSheets() (map[string]*StoreData, error) {
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, using system env")
-	}
-
 	sheetID := os.Getenv("GOOGLE_SHEET_ID")
 	gidsEnv := os.Getenv("GOOGLE_SHEET_GIDS")   // 例如 "0,123456789"
 	namesEnv := os.Getenv("GOOGLE_SHEET_NAMES") // 對應名稱 "秋葵,產銷絲瓜"
@@ -110,34 +105,6 @@ func LoadAndOrganizeSheets() (map[string]*StoreData, error) {
 					storeMap[storeName].SpongeGourdShipments = append(storeMap[storeName].SpongeGourdShipments, shipment)
 				}
 			}
-		}
-	}
-
-	// ⚡️ 新增：搜尋每個店的地點資訊
-	for storeName, storeData := range storeMap {
-		// 組合搜尋關鍵字：全聯 + 店名
-		searchQuery := fmt.Sprintf("全聯 %s", storeName)
-		log.Printf("搜尋店家: %s", searchQuery)
-		
-		placeRes, err := SearchPlaceByName(searchQuery)
-		if err != nil {
-			log.Printf("無法找到 %s 的地點資訊: %v", searchQuery, err)
-			continue
-		}
-
-		if len(placeRes.Places) > 0 {
-			place := placeRes.Places[0]
-			storeData.PlaceID = place.ID
-			storeData.FormattedAddress = place.FormattedAddress
-			storeData.Latitude = place.Location.Latitude
-			storeData.Longitude = place.Location.Longitude
-			
-			log.Printf("找到 %s: %s (%.6f, %.6f)", 
-				storeName, 
-				place.FormattedAddress,
-				place.Location.Latitude,
-				place.Location.Longitude,
-			)
 		}
 	}
 

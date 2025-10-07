@@ -11,10 +11,25 @@ import (
 	"PXMarkMapBackEnd/pkg/scheduler"
 	"PXMarkMapBackEnd/pkg/server"
 	"PXMarkMapBackEnd/pkg/sync"
+	
+	"github.com/joho/godotenv"
 )
 
+func init() {
+	// Load .env file only in development
+	// In production, environment variables are set by the platform
+	if err := godotenv.Load(); err != nil {
+		// Check if we're in production
+		if os.Getenv("GO_ENV") == "production" {
+			log.Println("[INFO] Running in production mode, using platform environment variables")
+		} else {
+			log.Println("[INFO] No .env file found, using system environment variables")
+		}
+	}
+}
+
 func main() {
-	// 取得命令參數
+	// Get command parameter
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)
@@ -22,26 +37,22 @@ func main() {
 
 	command := os.Args[1]
 
-	// 連接資料庫
+	// Connect to database
 	db := connectDatabase()
 	defer db.Close()
 
-	// 根據命令執行不同功能
+	// Execute command
 	switch command {
 	case "sync":
-		// 手動執行同步
 		handleSync(db)
 
 	case "serve":
-		// 啟動 API 伺服器
 		handleServe(db)
 
 	case "schedule":
-		// 啟動排程器
 		handleSchedule(db)
 
 	case "serve-schedule":
-		// API + 排程一起執行
 		handleServeWithSchedule(db)
 
 	default:
@@ -65,7 +76,7 @@ func connectDatabase() *sql.DB {
 
 	db, err := database.ConnectDB(dbConfig)
 	if err != nil {
-		log.Fatalf("無法連接資料庫: %v", err)
+		log.Fatalf("❌ 無法連接資料庫: %v", err)
 	}
 
 	return db
@@ -125,9 +136,10 @@ func handleSchedule(db *sql.DB) {
 	// 每天固定時間執行
 	s := scheduler.NewScheduler(db, 0)
 	s.StartDaily(scheduleHour, scheduleMinute)
+
 }
 
-// handleServeWithSchedule API + 排程一起執行
+// handleServeWithSchedule API and scheduler together
 func handleServeWithSchedule(db *sql.DB) {
 	log.Println("[INFO] 啟動 API 伺服器 + 排程器模式")
 
@@ -145,18 +157,18 @@ func handleServeWithSchedule(db *sql.DB) {
 		scheduleMinute = 0
 	}
 
-	// 啟動排程器（在背景執行）
+	// Start scheduler in background
 	go func() {
 		s := scheduler.NewScheduler(db, 0)
 		s.StartDaily(scheduleHour, scheduleMinute)
 	}()
 
-	// 啟動 API 伺服器（主執行緒）
+	// Start API server in main thread
 	port := getEnv("API_PORT", "8080")
 	corsOrigins := getEnv("CORS_ORIGINS", "*")
 	recentDays, _ := strconv.Atoi(getEnv("RECENT_DAYS", "3"))
 	
-	// 同步端點設定
+	// Sync API settings
 	enableSync := getEnv("ENABLE_SYNC_API", "false") == "true"
 	syncSecret := getEnv("SYNC_SECRET", "")
 	

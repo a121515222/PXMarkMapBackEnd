@@ -8,16 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-
-	"github.com/joho/godotenv"
 )
-
-func init() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Println("Warning: .env file not found")
-	}
-}
 
 // PlaceSearchResponse 回傳結構
 type PlaceSearchResponse struct {
