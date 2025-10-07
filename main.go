@@ -73,13 +73,13 @@ func connectDatabase() *sql.DB {
 
 // handleSync 處理手動同步
 func handleSync(db *sql.DB) {
-	log.Println("執行手動同步...")
+	log.Println("[INFO] 執行手動同步...")
 	
 	if err := sync.SyncData(db); err != nil {
-		log.Fatalf("同步失敗: %v", err)
+		log.Fatalf("[ERROR] 同步失敗: %v", err)
 	}
 
-	log.Println("同步完成！")
+	log.Println("[INFO] 同步完成")
 }
 
 // handleServe 處理 API 伺服器
@@ -88,45 +88,25 @@ func handleServe(db *sql.DB) {
 	corsOrigins := getEnv("CORS_ORIGINS", "*")
 	recentDays, _ := strconv.Atoi(getEnv("RECENT_DAYS", "3"))
 	
-	srv := server.NewServer(db, port, corsOrigins, recentDays)
+	// 同步端點設定
+	enableSync := getEnv("ENABLE_SYNC_API", "false") == "true"
+	syncSecret := getEnv("SYNC_SECRET", "")
+	
+	if enableSync && syncSecret == "" {
+		log.Fatal("[ERROR] 啟用同步 API 時必須設定 SYNC_SECRET")
+	}
+	
+	srv := server.NewServer(db, port, corsOrigins, recentDays, enableSync, syncSecret)
 
-	log.Println("啟動 API 伺服器模式")
+	log.Println("[INFO] 啟動 API 伺服器模式")
 	if err := srv.Start(); err != nil {
-		log.Fatalf("API 伺服器啟動失敗: %v", err)
+		log.Fatalf("[ERROR] API 伺服器啟動失敗: %v", err)
 	}
 }
 
 // handleSchedule 處理排程器
 func handleSchedule(db *sql.DB) {
-	log.Println("啟動排程器模式")
-
-	// 從環境變數讀取排程時間
-	scheduleHour, _ := strconv.Atoi(getEnv("SCHEDULE_HOUR", "0"))
-	scheduleMinute, _ := strconv.Atoi(getEnv("SCHEDULE_MINUTE", "0"))
-
-	// 驗證時間範圍
-	if scheduleHour < 0 || scheduleHour > 23 {
-		log.Printf("無效的小時設定 %d，使用預設值 2", scheduleHour)
-		scheduleHour = 2
-	}
-	if scheduleMinute < 0 || scheduleMinute > 59 {
-		log.Printf("無效的分鐘設定 %d，使用預設值 0", scheduleMinute)
-		scheduleMinute = 0
-	}
-
-	// 方式 1: 每隔固定時間執行（例如每 1 小時）
-	// interval := 1 * time.Hour
-	// s := scheduler.NewScheduler(db, interval)
-	// s.Start()
-
-	// 方式 2: 每天固定時間執行
-	s := scheduler.NewScheduler(db, 0)
-	s.StartDaily(scheduleHour, scheduleMinute)
-}
-
-// handleServeWithSchedule API + 排程一起執行
-func handleServeWithSchedule(db *sql.DB) {
-	log.Println("啟動 API 伺服器 + 排程器模式")
+	log.Println("[INFO] 啟動排程器模式")
 
 	// 從環境變數讀取排程時間
 	scheduleHour, _ := strconv.Atoi(getEnv("SCHEDULE_HOUR", "2"))
@@ -134,11 +114,34 @@ func handleServeWithSchedule(db *sql.DB) {
 
 	// 驗證時間範圍
 	if scheduleHour < 0 || scheduleHour > 23 {
-		log.Printf("無效的小時設定 %d，使用預設值 2", scheduleHour)
+		log.Printf("[WARN] 無效的小時設定 %d，使用預設值 2", scheduleHour)
 		scheduleHour = 2
 	}
 	if scheduleMinute < 0 || scheduleMinute > 59 {
-		log.Printf("無效的分鐘設定 %d，使用預設值 0", scheduleMinute)
+		log.Printf("[WARN] 無效的分鐘設定 %d，使用預設值 0", scheduleMinute)
+		scheduleMinute = 0
+	}
+
+	// 每天固定時間執行
+	s := scheduler.NewScheduler(db, 0)
+	s.StartDaily(scheduleHour, scheduleMinute)
+}
+
+// handleServeWithSchedule API + 排程一起執行
+func handleServeWithSchedule(db *sql.DB) {
+	log.Println("[INFO] 啟動 API 伺服器 + 排程器模式")
+
+	// 從環境變數讀取排程時間
+	scheduleHour, _ := strconv.Atoi(getEnv("SCHEDULE_HOUR", "2"))
+	scheduleMinute, _ := strconv.Atoi(getEnv("SCHEDULE_MINUTE", "0"))
+
+	// 驗證時間範圍
+	if scheduleHour < 0 || scheduleHour > 23 {
+		log.Printf("[WARN] 無效的小時設定 %d，使用預設值 2", scheduleHour)
+		scheduleHour = 2
+	}
+	if scheduleMinute < 0 || scheduleMinute > 59 {
+		log.Printf("[WARN] 無效的分鐘設定 %d，使用預設值 0", scheduleMinute)
 		scheduleMinute = 0
 	}
 
@@ -152,10 +155,19 @@ func handleServeWithSchedule(db *sql.DB) {
 	port := getEnv("API_PORT", "8080")
 	corsOrigins := getEnv("CORS_ORIGINS", "*")
 	recentDays, _ := strconv.Atoi(getEnv("RECENT_DAYS", "3"))
-	srv := server.NewServer(db, port, corsOrigins, recentDays)
+	
+	// 同步端點設定
+	enableSync := getEnv("ENABLE_SYNC_API", "false") == "true"
+	syncSecret := getEnv("SYNC_SECRET", "")
+	
+	if enableSync && syncSecret == "" {
+		log.Fatal("[ERROR] 啟用同步 API 時必須設定 SYNC_SECRET")
+	}
+	
+	srv := server.NewServer(db, port, corsOrigins, recentDays, enableSync, syncSecret)
 	
 	if err := srv.Start(); err != nil {
-		log.Fatalf("❌ API 伺服器啟動失敗: %v", err)
+		log.Fatalf("[ERROR] API 伺服器啟動失敗: %v", err)
 	}
 }
 
@@ -191,6 +203,8 @@ PXMarkMap Backend - 使用說明
   RECENT_DAYS              查詢近幾天的出貨資料（預設 3）
   SCHEDULE_HOUR            排程執行的小時（0-23，預設 2）
   SCHEDULE_MINUTE          排程執行的分鐘（0-59，預設 0）
+  ENABLE_SYNC_API          是否啟用手動同步 API（true/false，預設 false）
+  SYNC_SECRET              同步 API 的密鑰（啟用時必填）
 	`)
 }
 

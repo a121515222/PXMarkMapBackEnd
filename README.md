@@ -5,6 +5,10 @@ go run main.go serve             # 啟動 API (http://localhost:8080)
 go run main.go schedule          # 啟動排程器
 go run main.go serve-schedule    # API + 排程一起跑
 
+手動同步
+
+curl -X POST "http://localhost:8080/api/triggerSync?secret=my-strong-secret-2025!@#"
+
 資料庫建立
 
 psql -U postgres -c "CREATE DATABASE px_mark_map_db;"

@@ -132,7 +132,7 @@ func LoadAndOrganizeSheets() (map[string]*StoreData, error) {
 			storeData.Latitude = place.Location.Latitude
 			storeData.Longitude = place.Location.Longitude
 			
-			log.Printf("✓ 找到 %s: %s (%.6f, %.6f)", 
+			log.Printf("找到 %s: %s (%.6f, %.6f)", 
 				storeName, 
 				place.FormattedAddress,
 				place.Location.Latitude,

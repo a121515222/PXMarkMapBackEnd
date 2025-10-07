@@ -34,14 +34,18 @@ type Server struct {
 	CORSOrigins     []string // CORS 允許的來源列表
 	AllowAllOrigins bool     // 是否允許所有來源
 	RecentDays      int      // 查詢近幾天的資料
+	EnableSync      bool     // 是否啟用手動同步端點
+	SyncSecret      string   // 同步端點的密鑰
 }
 
 // NewServer 建立新的 API 伺服器
-func NewServer(db *sql.DB, port string, corsOrigins string, recentDays int) *Server {
+func NewServer(db *sql.DB, port string, corsOrigins string, recentDays int, enableSync bool, syncSecret string) *Server {
 	server := &Server{
 		DB:         db,
 		Port:       port,
 		RecentDays: recentDays,
+		EnableSync: enableSync,
+		SyncSecret: syncSecret,
 	}
 
 	// 解析 CORS 設定
@@ -62,23 +66,58 @@ func NewServer(db *sql.DB, port string, corsOrigins string, recentDays int) *Ser
 }
 
 // Start 啟動 API 伺服器
-func (s *Server) Start() error {
-	http.HandleFunc("/api/shopeMap", s.handleShopeMap)
-	http.HandleFunc("/api/triggerSync", s.handleTriggerSync)
+// func (s *Server) Start() error {
+// 	http.HandleFunc("/api/shopeMap", s.handleShopeMap)
+	
+// 	// 只有啟用時才註冊同步端點
+// 	if s.EnableSync {
+// 		http.HandleFunc("/api/triggerSync", s.handleTriggerSync)
+// 		log.Printf("[INFO] 手動同步端點: http://localhost:%s/api/triggerSync", s.Port)
+// 		log.Printf("[INFO] 同步端點已啟用（需要密鑰驗證）")
+// 	} else {
+// 		log.Printf("[WARN] 手動同步端點已停用")
+// 	}
 
-	log.Printf("🚀 API 伺服器啟動於 http://localhost:%s", s.Port)
-	log.Printf("📍 店家地圖端點: http://localhost:%s/api/shopeMap", s.Port)
-	log.Printf("🔄 手動同步端點: http://localhost:%s/api/triggerSync", s.Port)
+// 	log.Printf("[INFO] API 伺服器啟動於 http://localhost:%s", s.Port)
+// 	log.Printf("[INFO] 店家地圖端點: http://localhost:%s/api/shopeMap", s.Port)
+// 	log.Printf("[INFO] 查詢近 %d 天的出貨資料", s.RecentDays)
 	
-	if s.AllowAllOrigins {
-		log.Printf("CORS 設定: 允許所有來源 (*)")
+// 	if s.AllowAllOrigins {
+// 		log.Printf("[INFO] CORS 設定: 允許所有來源 (*)")
+// 	} else {
+// 		log.Printf("[INFO] CORS 設定: %v", s.CORSOrigins)
+// 	}
+	
+// 	return http.ListenAndServe(":"+s.Port, nil)
+// }
+func (s *Server) Start() error {
+	// API 路由
+	http.HandleFunc("/api/shopeMap", s.handleShopeMap)
+
+	if s.EnableSync {
+		http.HandleFunc("/api/triggerSync", s.handleTriggerSync)
+		log.Printf("[INFO] 手動同步端點: http://localhost:%s/api/triggerSync", s.Port)
+		log.Printf("[INFO] 同步端點已啟用（需要密鑰驗證）")
 	} else {
-		log.Printf("CORS 設定: %v", s.CORSOrigins)
+		log.Printf("[WARN] 手動同步端點已停用")
 	}
-	
+
+	// 靜態檔案服務
+	fs := http.FileServer(http.Dir("./static"))
+	http.Handle("/", fs)
+
+	log.Printf("[INFO] API 伺服器啟動於 http://localhost:%s", s.Port)
+	log.Printf("[INFO] 店家地圖端點: http://localhost:%s/api/shopeMap", s.Port)
+	log.Printf("[INFO] 查詢近 %d 天的出貨資料", s.RecentDays)
+
+	if s.AllowAllOrigins {
+		log.Printf("[INFO] CORS 設定: 允許所有來源 (*)")
+	} else {
+		log.Printf("[INFO] CORS 設定: %v", s.CORSOrigins)
+	}
+
 	return http.ListenAndServe(":"+s.Port, nil)
 }
-
 // handleShopeMap 處理店家地圖請求
 func (s *Server) handleShopeMap(w http.ResponseWriter, r *http.Request) {
 	// 設定 CORS
@@ -96,10 +135,10 @@ func (s *Server) handleShopeMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 從資料庫查詢近 3 天的出貨資料
-	data, err := database.GetRecentShipments(s.DB, 3)
+	// 從資料庫查詢近 N 天的出貨資料
+	data, err := database.GetRecentShipments(s.DB, s.RecentDays)
 	if err != nil {
-		log.Printf("查詢資料失敗: %v", err)
+		log.Printf("[ERROR] 查詢資料失敗: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -109,12 +148,12 @@ func (s *Server) handleShopeMap(w http.ResponseWriter, r *http.Request) {
 
 	// 回傳 JSON
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("編碼 JSON 失敗: %v", err)
+		log.Printf("[ERROR] 編碼 JSON 失敗: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("✓ 回傳 %d 個店家的資料", len(response))
+	log.Printf("[INFO] 回傳 %d 個店家的資料", len(response))
 }
 
 // setCORSHeaders 設定 CORS 標頭
@@ -181,7 +220,7 @@ func (s *Server) formatResponse(data []map[string]interface{}) []StoreMapRespons
 	return response
 }
 
-// handleTriggerSync 處理手動觸發同步
+// handleTriggerSync 處理手動觸發同步（需要密鑰驗證）
 func (s *Server) handleTriggerSync(w http.ResponseWriter, r *http.Request) {
 	// 設定 CORS
 	s.setCORSHeaders(w, r)
@@ -198,14 +237,27 @@ func (s *Server) handleTriggerSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Println("收到手動同步請求...")
+	// 驗證密鑰
+	secret := r.Header.Get("X-Sync-Secret")
+	if secret == "" {
+		// 也支援從 query parameter 讀取（方便測試）
+		secret = r.URL.Query().Get("secret")
+	}
+
+	if secret != s.SyncSecret {
+		log.Printf("[WARN] 同步請求被拒絕：密鑰錯誤")
+		http.Error(w, "Unauthorized: Invalid secret", http.StatusUnauthorized)
+		return
+	}
+
+	log.Println("[INFO] 收到手動同步請求（密鑰驗證通過）")
 
 	// 在背景執行同步（避免阻塞 API）
 	go func() {
 		if err := sync.SyncData(s.DB); err != nil {
-			log.Printf("同步失敗: %v", err)
+			log.Printf("[ERROR] 同步失敗: %v", err)
 		} else {
-			log.Println("手動同步完成！")
+			log.Println("[INFO] 手動同步完成")
 		}
 	}()
 
@@ -217,5 +269,5 @@ func (s *Server) handleTriggerSync(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(response)
-	log.Println("✓ 已回應同步請求，同步任務在背景執行中")
+	log.Println("[INFO] 已回應同步請求，同步任務在背景執行中")
 }

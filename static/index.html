@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PXMarkMap 同步控制面板</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .config-section {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            color: #555;
+            font-size: 14px;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #5a6268;
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            display: none;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .status.info {
+            background: #cfe2ff;
+            color: #084298;
+            border-left: 4px solid #0d6efd;
+        }
+
+        .status.success {
+            background: #d1e7dd;
+            color: #0f5132;
+            border-left: 4px solid #198754;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #842029;
+            border-left: 4px solid #dc3545;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .footer {
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔄 同步控制面板</h1>
+        <p class="subtitle">手動觸發資料同步作業</p>
+
+        <div class="config-section">
+            <div class="input-group">
+                <label for="apiUrl">API 伺服器位址</label>
+                <input type="text" id="apiUrl" value="http://localhost:8080" placeholder="http://localhost:8080">
+            </div>
+
+            <div class="input-group">
+                <label for="secretKey">同步密鑰 (Secret Key)</label>
+                <input type="password" id="secretKey" placeholder="請輸入 SYNC_SECRET">
+            </div>
+        </div>
+
+        <div id="status" class="status"></div>
+
+        <div class="button-group">
+            <button class="btn-primary" id="syncBtn" onclick="triggerSync()">
+                執行同步
+            </button>
+            <button class="btn-secondary" onclick="testConnection()">
+                測試連線
+            </button>
+        </div>
+
+        <div class="footer">
+            PXMarkMap Backend v1.0
+        </div>
+    </div>
+
+    <script>
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+        }
+
+        function hideStatus() {
+            const statusDiv = document.getElementById('status');
+            statusDiv.style.display = 'none';
+        }
+
+        async function testConnection() {
+            const apiUrl = document.getElementById('apiUrl').value.trim();
+            
+            if (!apiUrl) {
+                showStatus('請輸入 API 伺服器位址', 'error');
+                return;
+            }
+
+            hideStatus();
+            showStatus('正在測試連線...', 'info');
+
+            try {
+                const response = await fetch(`${apiUrl}/api/shopeMap`, {
+                    method: 'GET',
+                });
+
+                if (response.ok) {
+                    showStatus('連線成功！API 伺服器運作正常', 'success');
+                } else {
+                    showStatus(`連線失敗: HTTP ${response.status}`, 'error');
+                }
+            } catch (error) {
+                showStatus(`無法連接到伺服器: ${error.message}`, 'error');
+            }
+        }
+
+        async function triggerSync() {
+            const apiUrl = document.getElementById('apiUrl').value.trim();
+            const secretKey = document.getElementById('secretKey').value.trim();
+            const syncBtn = document.getElementById('syncBtn');
+
+            if (!apiUrl) {
+                showStatus('請輸入 API 伺服器位址', 'error');
+                return;
+            }
+
+            if (!secretKey) {
+                showStatus('請輸入同步密鑰', 'error');
+                return;
+            }
+
+            // 禁用按鈕並顯示載入狀態
+            syncBtn.disabled = true;
+            syncBtn.innerHTML = '<span class="loading"></span>同步中...';
+            hideStatus();
+            showStatus('正在觸發同步作業...', 'info');
+
+            try {
+                const response = await fetch(`${apiUrl}/api/triggerSync`, {
+                    method: 'POST',
+                    headers: {
+                        'X-Sync-Secret': secretKey,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    showStatus(`${data.message || '同步任務已成功觸發！'}`, 'success');
+                } else if (response.status === 401) {
+                    showStatus('密鑰錯誤，請檢查 SYNC_SECRET 是否正確', 'error');
+                } else {
+                    showStatus(`同步失敗: HTTP ${response.status}`, 'error');
+                }
+            } catch (error) {
+                showStatus(`請求失敗: ${error.message}`, 'error');
+            } finally {
+                // 恢復按鈕狀態
+                syncBtn.disabled = false;
+                syncBtn.innerHTML = '執行同步';
+            }
+        }
+
+        // 監聽 Enter 鍵
+        document.getElementById('secretKey').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                triggerSync();
+            }
+        });
+
+        // 頁面載入時從 localStorage 讀取設定
+        window.addEventListener('load', function() {
+            const savedUrl = localStorage.getItem('apiUrl');
+            if (savedUrl) {
+                document.getElementById('apiUrl').value = savedUrl;
+            }
+        });
+
+        // 保存 API URL 到 localStorage
+        document.getElementById('apiUrl').addEventListener('change', function() {
+            localStorage.setItem('apiUrl', this.value);
+        });
+    </script>
+</body>
+</html>

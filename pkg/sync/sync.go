@@ -13,29 +13,29 @@ func SyncData(db *sql.DB) error {
 	log.Println("=== 開始同步資料 ===")
 
 	// 步驟 1: 從 Google Sheets 讀取資料
-	log.Println("📄 讀取 Google Sheets 資料...")
+	log.Println("[INFO] 讀取 Google Sheets 資料...")
 	storeMap, err := google.LoadAndOrganizeSheets()
 	if err != nil {
 		return err
 	}
-	log.Printf("✓ 成功讀取 %d 個店家\n", len(storeMap))
+	log.Printf("[INFO] 成功讀取 %d 個店家\n", len(storeMap))
 
 	// 步驟 2: 使用 Places API 搜尋地點資訊
-	log.Println("📍 搜尋店家地點資訊...")
+	log.Println("[INFO] 搜尋店家地點資訊...")
 	if err := google.EnrichStoresWithPlaceData(storeMap); err != nil {
-		log.Printf("⚠ 搜尋地點資訊時發生錯誤: %v", err)
+		log.Printf("[WARN] 搜尋地點資訊時發生錯誤: %v", err)
 	}
 
 	// 步驟 3: 轉換資料格式
 	stores := convertToStoreInfo(storeMap)
 
 	// 步驟 4: 儲存到資料庫
-	log.Println("💾 儲存資料到資料庫...")
+	log.Println("[INFO] 儲存資料到資料庫...")
 	if err := database.SaveStores(db, stores); err != nil {
 		return err
 	}
 
-	log.Println("✓ 資料同步完成！")
+	log.Println("[INFO] 資料同步完成")
 	return nil
 }
 

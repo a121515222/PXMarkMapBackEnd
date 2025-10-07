@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	_"github.com/lib/pq"
+	_ "github.com/lib/pq"
 )
 
 // DBConfig 資料庫連線設定
@@ -34,7 +34,7 @@ func ConnectDB(config DBConfig) (*sql.DB, error) {
 		return nil, err
 	}
 
-	log.Println("✓ 成功連接到 PostgreSQL")
+	log.Println("[INFO] 成功連接到 PostgreSQL")
 	return db, nil
 }
 
@@ -97,14 +97,14 @@ func SaveStores(db *sql.DB, stores []StoreInfo) error {
 			}
 		}
 
-		log.Printf("✓ 已儲存 %s 的資料", store.StoreName)
+		log.Printf("[INFO] 已儲存 %s 的資料", store.StoreName)
 	}
 
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 
-	log.Println("✓ 所有資料已成功儲存到資料庫")
+	log.Println("[INFO] 所有資料已成功儲存到資料庫")
 	return nil
 }
 
