@@ -1,0 +1,4 @@
+{
+  "build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o main .",
+  "start_command": "./main serve-schedule"
+}
