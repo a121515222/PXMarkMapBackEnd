@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
+	"time"
 )
 
 // PlaceSearchResponse 回傳結構
@@ -71,33 +73,74 @@ func SearchPlaceByName(storeName string) (*PlaceSearchResponse, error) {
 }
 
 // EnrichStoresWithPlaceData 為所有店家加上地點資訊
+// func EnrichStoresWithPlaceData(storeMap map[string]*StoreData) error {
+// 	for storeName, storeData := range storeMap {
+// 		// 組合搜尋關鍵字：全聯 + 店名
+// 		searchQuery := fmt.Sprintf("全聯 %s", storeName)
+// 		log.Printf("搜尋店家: %s", searchQuery)
+
+// 		placeRes, err := SearchPlaceByName(searchQuery)
+// 		if err != nil {
+// 			log.Printf("⚠ 無法找到 %s 的地點資訊: %v", searchQuery, err)
+// 			continue
+// 		}
+
+// 		if len(placeRes.Places) > 0 {
+// 			place := placeRes.Places[0]
+// 			storeData.PlaceID = place.ID
+// 			storeData.FormattedAddress = place.FormattedAddress
+// 			storeData.Latitude = place.Location.Latitude
+// 			storeData.Longitude = place.Location.Longitude
+
+// 			log.Printf("✓ 找到 %s: %s (%.6f, %.6f)",
+// 				storeName,
+// 				place.FormattedAddress,
+// 				place.Location.Latitude,
+// 				place.Location.Longitude,
+// 			)
+// 		}
+// 	}
+
+// 	return nil
+// }
 func EnrichStoresWithPlaceData(storeMap map[string]*StoreData) error {
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 10) // 同時最多 10 個查詢
+
 	for storeName, storeData := range storeMap {
-		// 組合搜尋關鍵字：全聯 + 店名
-		searchQuery := fmt.Sprintf("全聯 %s", storeName)
-		log.Printf("搜尋店家: %s", searchQuery)
+		wg.Add(1)
+		go func(name string, data *StoreData) {
+			defer wg.Done()
+			sem <- struct{}{} // 進入工作池
+			defer func() { <-sem }()
 
-		placeRes, err := SearchPlaceByName(searchQuery)
-		if err != nil {
-			log.Printf("⚠ 無法找到 %s 的地點資訊: %v", searchQuery, err)
-			continue
-		}
+			searchQuery := "全聯 " + name
+			log.Printf("搜尋店家: %s", searchQuery)
 
-		if len(placeRes.Places) > 0 {
-			place := placeRes.Places[0]
-			storeData.PlaceID = place.ID
-			storeData.FormattedAddress = place.FormattedAddress
-			storeData.Latitude = place.Location.Latitude
-			storeData.Longitude = place.Location.Longitude
+			placeRes, err := SearchPlaceByName(searchQuery)
+			if err != nil {
+				log.Printf("⚠ 無法找到 %s 的地點資訊: %v", searchQuery, err)
+				return
+			}
 
-			log.Printf("✓ 找到 %s: %s (%.6f, %.6f)",
-				storeName,
-				place.FormattedAddress,
-				place.Location.Latitude,
-				place.Location.Longitude,
-			)
-		}
+			if len(placeRes.Places) > 0 {
+				place := placeRes.Places[0]
+				data.PlaceID = place.ID
+				data.FormattedAddress = place.FormattedAddress
+				data.Latitude = place.Location.Latitude
+				data.Longitude = place.Location.Longitude
+
+				log.Printf("✓ 找到 %s: %s (%.6f, %.6f)",
+					name, place.FormattedAddress,
+					place.Location.Latitude, place.Location.Longitude)
+			}
+
+			// 為避免 API 配額過快消耗，可加一點點間隔
+			time.Sleep(150 * time.Millisecond)
+		}(storeName, storeData)
 	}
 
+	wg.Wait()
+	log.Println("[INFO] 所有店家地點查詢完成")
 	return nil
 }

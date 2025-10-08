@@ -75,6 +75,26 @@
             border-color: #667eea;
         }
 
+        .sync-section {
+            background: #f0f4ff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 15px;
+        }
+
+        .sync-section h3 {
+            color: #333;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+
+        .sync-section p {
+            color: #666;
+            font-size: 13px;
+            margin-bottom: 15px;
+            line-height: 1.5;
+        }
+
         .button-group {
             display: flex;
             gap: 10px;
@@ -100,6 +120,16 @@
         .btn-primary:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-daily {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+
+        .btn-daily:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(245, 87, 108, 0.4);
         }
 
         .btn-secondary {
@@ -175,6 +205,10 @@
             font-size: 12px;
             margin-top: 20px;
         }
+
+        .full-width-btn {
+            width: 100%;
+        }
     </style>
 </head>
 <body>
@@ -185,7 +219,7 @@
         <div class="config-section">
             <div class="input-group">
                 <label for="apiUrl">API 伺服器位址</label>
-                <input type="text" id="apiUrl" value="{{.APIUrl}}" placeholder="API 伺服器位址">
+                <input type="text" id="apiUrl" value="http://localhost:8080" placeholder="http://localhost:8080">
             </div>
 
             <div class="input-group">
@@ -196,14 +230,28 @@
 
         <div id="status" class="status"></div>
 
-        <div class="button-group">
-            <button class="btn-primary" id="syncBtn" onclick="triggerSync()">
-                執行同步
-            </button>
-            <button class="btn-secondary" onclick="testConnection()">
-                測試連線
+        <!-- 每日同步區塊 -->
+        <div class="sync-section">
+            <h3>📅 每日更新</h3>
+            <p>只更新出貨資料，使用資料庫現有的店家地點資訊（不呼叫 Places API）</p>
+            <button class="btn-daily full-width-btn" id="dailySyncBtn" onclick="triggerDailySync()">
+                執行每日更新
             </button>
         </div>
+
+        <!-- 每月同步區塊 -->
+        <div class="sync-section">
+            <h3>🗓️ 每月完整同步</h3>
+            <p>完整同步所有資料，包含使用 Places API 更新店家地點資訊</p>
+            <button class="btn-primary full-width-btn" id="monthlySyncBtn" onclick="triggerMonthlySync()">
+                執行每月完整同步
+            </button>
+        </div>
+
+        <!-- 測試連線 -->
+        <button class="btn-secondary full-width-btn" onclick="testConnection()">
+            測試 API 連線
+        </button>
 
         <div class="footer">
             PXMarkMap Backend v1.0
@@ -240,19 +288,27 @@
                 });
 
                 if (response.ok) {
-                    showStatus('連線成功！API 伺服器運作正常', 'success');
+                    showStatus('✅ 連線成功！API 伺服器運作正常', 'success');
                 } else {
-                    showStatus(`連線失敗: HTTP ${response.status}`, 'error');
+                    showStatus(`❌ 連線失敗: HTTP ${response.status}`, 'error');
                 }
             } catch (error) {
-                showStatus(`無法連接到伺服器: ${error.message}`, 'error');
+                showStatus(`❌ 無法連接到伺服器: ${error.message}`, 'error');
             }
         }
 
-        async function triggerSync() {
+        async function triggerDailySync() {
+            await triggerSync('daily', 'dailySyncBtn');
+        }
+
+        async function triggerMonthlySync() {
+            await triggerSync('monthly', 'monthlySyncBtn');
+        }
+
+        async function triggerSync(syncType, buttonId) {
             const apiUrl = document.getElementById('apiUrl').value.trim();
             const secretKey = document.getElementById('secretKey').value.trim();
-            const syncBtn = document.getElementById('syncBtn');
+            const syncBtn = document.getElementById(buttonId);
 
             if (!apiUrl) {
                 showStatus('請輸入 API 伺服器位址', 'error');
@@ -264,14 +320,16 @@
                 return;
             }
 
+            const syncTypeText = syncType === 'daily' ? '每日更新' : '每月完整同步';
+
             // 禁用按鈕並顯示載入狀態
             syncBtn.disabled = true;
-            syncBtn.innerHTML = '<span class="loading"></span>同步中...';
+            syncBtn.innerHTML = `<span class="loading"></span>${syncTypeText}中...`;
             hideStatus();
-            showStatus('正在觸發同步作業...', 'info');
+            showStatus(`正在觸發${syncTypeText}作業...`, 'info');
 
             try {
-                const response = await fetch(`${apiUrl}/api/triggerSync`, {
+                const response = await fetch(`${apiUrl}/api/triggerSync?type=${syncType}`, {
                     method: 'POST',
                     headers: {
                         'X-Sync-Secret': secretKey,
@@ -281,25 +339,25 @@
 
                 if (response.ok) {
                     const data = await response.json();
-                    showStatus(`${data.message || '同步任務已成功觸發！'}`, 'success');
+                    showStatus(`✅ ${data.message || `${syncTypeText}任務已成功觸發！`}`, 'success');
                 } else if (response.status === 401) {
-                    showStatus('密鑰錯誤，請檢查 SYNC_SECRET 是否正確', 'error');
+                    showStatus('❌ 密鑰錯誤，請檢查 SYNC_SECRET 是否正確', 'error');
                 } else {
-                    showStatus(`同步失敗: HTTP ${response.status}`, 'error');
+                    showStatus(`❌ 同步失敗: HTTP ${response.status}`, 'error');
                 }
             } catch (error) {
-                showStatus(`請求失敗: ${error.message}`, 'error');
+                showStatus(`❌ 請求失敗: ${error.message}`, 'error');
             } finally {
                 // 恢復按鈕狀態
                 syncBtn.disabled = false;
-                syncBtn.innerHTML = '執行同步';
+                syncBtn.innerHTML = syncType === 'daily' ? '執行每日更新' : '執行每月完整同步';
             }
         }
 
         // 監聽 Enter 鍵
         document.getElementById('secretKey').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
-                triggerSync();
+                triggerDailySync();
             }
         });
 

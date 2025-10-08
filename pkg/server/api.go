@@ -221,7 +221,7 @@ func (s *Server) formatResponse(data []map[string]interface{}) []StoreMapRespons
 }
 
 // handleTriggerSync 處理手動觸發同步（需要密鑰驗證）
-func (s *Server) handleTriggerSync(w http.ResponseWriter, r *http.Request) {
+unc (s *Server) handleTriggerSync(w http.ResponseWriter, r *http.Request) {
 	// 設定 CORS
 	s.setCORSHeaders(w, r)
 
@@ -240,7 +240,6 @@ func (s *Server) handleTriggerSync(w http.ResponseWriter, r *http.Request) {
 	// 驗證密鑰
 	secret := r.Header.Get("X-Sync-Secret")
 	if secret == "" {
-		// 也支援從 query parameter 讀取（方便測試）
 		secret = r.URL.Query().Get("secret")
 	}
 
@@ -250,24 +249,42 @@ func (s *Server) handleTriggerSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Println("[INFO] 收到手動同步請求（密鑰驗證通過）")
+	// 取得同步類型
+	syncType := r.URL.Query().Get("type")
+	if syncType == "" {
+		syncType = "daily" // 預設為每日
+	}
+
+	syncTypeText := "每日更新"
+	if syncType == "monthly" {
+		syncTypeText = "每月完整同步"
+	}
+
+	log.Printf("[INFO] 收到手動%s請求（密鑰驗證通過）", syncTypeText)
 
 	// 在背景執行同步（避免阻塞 API）
 	go func() {
-		if err := sync.SyncData(s.DB); err != nil {
-			log.Printf("[ERROR] 同步失敗: %v", err)
+		var err error
+		if syncType == "monthly" {
+			err = sync.SyncData(s.DB) // 完整同步
 		} else {
-			log.Println("[INFO] 手動同步完成")
+			err = sync.SyncDataDaily(s.DB) // 每日同步
+		}
+
+		if err != nil {
+			log.Printf("[ERROR] %s失敗: %v", syncTypeText, err)
+		} else {
+			log.Printf("[INFO] 手動%s完成", syncTypeText)
 		}
 	}()
 
 	// 立即回應
 	response := map[string]string{
 		"status":  "triggered",
-		"message": "同步任務已觸發，正在背景執行",
+		"message": fmt.Sprintf("%s任務已觸發，正在背景執行", syncTypeText),
 	}
 
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(response)
-	log.Println("[INFO] 已回應同步請求，同步任務在背景執行中")
+	log.Printf("[INFO] 已回應%s請求，同步任務在背景執行中", syncTypeText)
 }

@@ -85,26 +85,34 @@ func handleServe(db *sql.DB) {
 // handleSchedule 啟動排程器
 func handleSchedule(db *sql.DB) {
 	log.Println("[INFO] 啟動排程器模式")
-	scheduleHour, _ := strconv.Atoi(getEnv("SCHEDULE_HOUR", "0"))
-	scheduleMinute, _ := strconv.Atoi(getEnv("SCHEDULE_MINUTE", "0"))
+	// 每日同步設定
+	dailyHour, _ := strconv.Atoi(getEnv("DAILY_SYNC_HOUR", "0"))
+	dailyMinute, _ := strconv.Atoi(getEnv("DAILY_SYNC_MINUTE", "0"))
 
-	s := scheduler.NewScheduler(db, 0)
-	s.StartDaily(scheduleHour, scheduleMinute)
+	// 每月同步設定
+	monthlyDay, _ := strconv.Atoi(getEnv("MONTHLY_SYNC_DAY", "1"))
+	monthlyHour, _ := strconv.Atoi(getEnv("MONTHLY_SYNC_HOUR", "3"))
+	monthlyMinute, _ := strconv.Atoi(getEnv("MONTHLY_SYNC_MINUTE", "0"))
+
+	// 啟動每日排程器（在背景執行）
+	go func() {
+		s := scheduler.NewScheduler(db, 0)
+		s.StartDaily(dailyHour, dailyMinute, false) // false = 每日更新
+	}()
+
+	// 啟動每月排程器（在背景執行）
+	go func() {
+		s := scheduler.NewScheduler(db, 0)
+		s.StartMonthly(monthlyDay, monthlyHour, monthlyMinute)
+	}()
 }
 
 // handleServeWithSchedule 同時啟動 API + 排程
 func handleServeWithSchedule(db *sql.DB) {
 	log.Println("[INFO] 啟動 API + 排程器模式")
 
-	scheduleHour, _ := strconv.Atoi(getEnv("SCHEDULE_HOUR", "0"))
-	scheduleMinute, _ := strconv.Atoi(getEnv("SCHEDULE_MINUTE", "0"))
-
-	// 啟動排程器
-	go func() {
-		s := scheduler.NewScheduler(db, 0)
-		s.StartDaily(scheduleHour, scheduleMinute)
-	}()
-
+	
+	handleSchedule(db)
 	// 啟動 Gin API
 	runGinServer(db)
 }
@@ -171,23 +179,47 @@ func runGinServer(db *sql.DB) {
 
 	// /api/triggerSync
 	if enableSync {
-		router.POST("/api/triggerSync", func(c *gin.Context) {
-			secret := c.GetHeader("X-Sync-Secret")
-			if secret == "" {
-				secret = c.Query("secret")
-			}
-			if secret != syncSecret {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid secret"})
+	router.POST("/api/triggerSync", func(c *gin.Context) {
+		secret := c.GetHeader("X-Sync-Secret")
+		if secret == "" {
+			secret = c.Query("secret")
+		}
+		if secret != syncSecret {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid secret"})
+			return
+		}
+
+		syncType := c.Query("type")
+		if syncType == "" {
+			syncType = "daily" // 預設每日同步
+		}
+
+		go func() {
+			var err error
+			switch syncType {
+			case "daily":
+				log.Println("[INFO] 觸發每日同步 (SyncDataDaily)")
+				err = sync.SyncDataDaily(db)
+			case "monthly":
+				log.Println("[INFO] 觸發每月完整同步 (SyncData)")
+				err = sync.SyncData(db)
+			default:
+				log.Printf("[WARN] 未知的同步類型: %s", syncType)
 				return
 			}
-			go func() {
-				if err := sync.SyncData(db); err != nil {
-					log.Printf("[ERROR] 同步失敗: %v", err)
-				} else {
-					log.Println("[INFO] 手動同步完成")
-				}
-			}()
-			c.JSON(http.StatusAccepted, gin.H{"status": "triggered", "message": "同步任務已觸發，正在背景執行"})
+
+			if err != nil {
+				log.Printf("[ERROR] %s 同步失敗: %v", syncType, err)
+			} else {
+				log.Printf("[INFO] %s 同步完成", syncType)
+			}
+		}()
+
+		c.JSON(http.StatusAccepted, gin.H{
+			"status":  "triggered",
+			"type":    syncType,
+			"message": "同步任務已觸發，正在背景執行",
+			})
 		})
 	}
 

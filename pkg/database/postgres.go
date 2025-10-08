@@ -202,3 +202,47 @@ func GetRecentShipments(db *sql.DB, days int) ([]map[string]interface{}, error) 
 
 	return results, nil
 }
+type ExistingStoreInfo struct {
+	PlaceID          string
+	FormattedAddress string
+	Latitude         float64
+	Longitude        float64
+}
+// ExistingStoreInfo 現有店家資訊
+// GetExistingStoresWithLocation 取得已有地點資訊的店家
+func GetExistingStoresWithLocation(db *sql.DB) (map[string]ExistingStoreInfo, error) {
+	query := `
+		SELECT store_name, place_id, formatted_address, latitude, longitude
+		FROM stores
+		WHERE place_id IS NOT NULL 
+		  AND place_id != ''
+		  AND latitude IS NOT NULL
+		  AND longitude IS NOT NULL
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]ExistingStoreInfo)
+
+	for rows.Next() {
+		var storeName, placeID, address string
+		var lat, lng float64
+
+		if err := rows.Scan(&storeName, &placeID, &address, &lat, &lng); err != nil {
+			continue
+		}
+
+		result[storeName] = ExistingStoreInfo{
+			PlaceID:          placeID,
+			FormattedAddress: address,
+			Latitude:         lat,
+			Longitude:        lng,
+		}
+	}
+
+	return result, nil
+}

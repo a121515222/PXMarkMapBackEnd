@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -63,7 +64,7 @@ func (s *Scheduler) Start() {
 	}
 
 	// 立即執行一次
-	s.runSync()
+	s.runSync(false)
 
 	// 建立定時器
 	ticker := time.NewTicker(s.Interval)
@@ -72,14 +73,19 @@ func (s *Scheduler) Start() {
 	for {
 		select {
 		case <-ticker.C:
-			s.runSync()
+			s.runSync(false)
 		}
 	}
 }
 
-// StartDaily 每天固定時間執行
-func (s *Scheduler) StartDaily(hour, minute int) {
-	log.Printf("[INFO] 排程器啟動，每天 %02d:%02d 執行同步", hour, minute)
+// StartDaily 每天固定時間執行（每日更新）
+func (s *Scheduler) StartDaily(hour, minute int, isFullSync bool) {
+	syncType := "每日更新"
+	if isFullSync {
+		syncType = "完整同步"
+	}
+
+	log.Printf("[INFO] 排程器啟動，每天 %02d:%02d 執行%s", hour, minute, syncType)
 
 	// 初始化記錄表
 	if err := s.InitSyncLogTable(); err != nil {
@@ -97,37 +103,65 @@ func (s *Scheduler) StartDaily(hour, minute int) {
 		nextRun := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
 
 		if now.After(nextRun) {
-			// 若已超過今日設定時間 → 立即執行一次
 			log.Println("[INFO] 已超過今日設定時間，立即執行一次同步")
-			s.runSync()
-
-			// 再等到明天相同時間
+			s.runSync(isFullSync)
 			nextRun = nextRun.Add(24 * time.Hour)
 		} else {
-			// 等待到今日的執行時間
 			waitDuration := time.Until(nextRun)
 			log.Printf("[INFO] 下次執行時間: %s", nextRun.Format("2006-01-02 15:04:05"))
 			log.Printf("[INFO] 等待時間: %v", waitDuration.Round(time.Second))
 			time.Sleep(waitDuration)
-
-			// 到達設定時間 → 執行一次
-			s.runSync()
-
-			// 等待明天
+			s.runSync(isFullSync)
 			nextRun = nextRun.Add(24 * time.Hour)
 		}
 
-		// 每次循環等待一天
 		log.Printf("[INFO] 下一輪同步預定於: %s", nextRun.Format("2006-01-02 15:04:05"))
 		time.Sleep(time.Until(nextRun))
 	}
 }
 
-// runSync 執行同步任務並記錄
-func (s *Scheduler) runSync() {
+// StartMonthly 每月固定日期執行（完整同步）
+func (s *Scheduler) StartMonthly(dayOfMonth, hour, minute int) {
+	log.Printf("[INFO] 排程器啟動，每月 %d 號 %02d:%02d 執行完整同步", dayOfMonth, hour, minute)
+
+	// 初始化記錄表
+	if err := s.InitSyncLogTable(); err != nil {
+		log.Printf("[WARN] 無法建立記錄表: %v", err)
+	}
+
+	for {
+		now := time.Now()
+
+		// 計算下次執行時間
+		nextRun := time.Date(now.Year(), now.Month(), dayOfMonth, hour, minute, 0, 0, now.Location())
+
+		// 如果本月的執行時間已過，移到下個月
+		if now.After(nextRun) {
+			nextRun = nextRun.AddDate(0, 1, 0)
+		}
+
+		waitDuration := time.Until(nextRun)
+		log.Printf("[INFO] 下次完整同步時間: %s", nextRun.Format("2006-01-02 15:04:05"))
+		log.Printf("[INFO] 等待時間: %v", waitDuration.Round(time.Hour))
+
+		time.Sleep(waitDuration)
+
+		// 執行完整同步
+		s.runSync(true)
+	}
+}
+
+// runSync 執行同步任務（根據 isFullSync 決定類型）
+func (s *Scheduler) runSync(isFullSync bool) {
 	startTime := time.Now()
+
+	syncType := "每日"
+	if isFullSync {
+		syncType = "完整"
+	}
+
 	log.Println("\n" + strings.Repeat("=", 50))
-	log.Println("[INFO] 排程任務觸發")
+	log.Printf("[INFO] %s同步任務觸發", syncType)
 	log.Printf("[INFO] 開始時間: %s", startTime.Format("2006-01-02 15:04:05"))
 
 	// 記錄開始
@@ -136,8 +170,14 @@ func (s *Scheduler) runSync() {
 		log.Printf("[WARN] 無法記錄開始時間: %v", err)
 	}
 
-	// 執行同步
-	syncErr := sync.SyncData(s.DB)
+	// 執行同步（根據類型）
+	var syncErr error
+	if isFullSync {
+		syncErr = sync.SyncData(s.DB) // 完整同步
+	} else {
+		syncErr = sync.SyncDataDaily(s.DB) // 每日同步
+	}
+
 	endTime := time.Now()
 	duration := endTime.Sub(startTime)
 
@@ -147,9 +187,9 @@ func (s *Scheduler) runSync() {
 		log.Printf("[INFO] 執行時間: %v", duration.Round(time.Second))
 		s.LogSyncEnd(logID, endTime, "failed", syncErr.Error())
 	} else {
-		log.Println("[INFO] 排程同步完成")
+		log.Printf("[INFO] %s同步完成", syncType)
 		log.Printf("[INFO] 執行時間: %v", duration.Round(time.Second))
-		s.LogSyncEnd(logID, endTime, "success", "同步成功")
+		s.LogSyncEnd(logID, endTime, "success", fmt.Sprintf("%s同步成功", syncType))
 	}
 
 	log.Println(strings.Repeat("=", 50))
