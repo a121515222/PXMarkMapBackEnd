@@ -159,6 +159,9 @@ func GetRecentShipments(db *sql.DB, days int) ([]map[string]interface{}, error) 
 		FROM stores s
 		JOIN shipments sh ON s.id = sh.store_id
 		WHERE sh.shipment_date >= CURRENT_DATE - INTERVAL '%d days'
+		  AND sh.quantity IS NOT NULL 
+		  AND sh.quantity != ''
+		  AND sh.quantity != '0'
 		ORDER BY s.store_name, sh.product_type, sh.shipment_date DESC
 	`
 
@@ -187,6 +190,11 @@ func GetRecentShipments(db *sql.DB, days int) ([]map[string]interface{}, error) 
 		}
 		if lng.Valid {
 			longitude = lng.Float64
+		}
+
+		// 額外檢查:確保數量不為空且不為 0
+		if quantity == "" || quantity == "0" {
+			continue
 		}
 
 		results = append(results, map[string]interface{}{
