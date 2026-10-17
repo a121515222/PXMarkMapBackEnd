@@ -3,6 +3,7 @@ package server
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -221,7 +222,7 @@ func (s *Server) formatResponse(data []map[string]interface{}) []StoreMapRespons
 }
 
 // handleTriggerSync 處理手動觸發同步（需要密鑰驗證）
-unc (s *Server) handleTriggerSync(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleTriggerSync(w http.ResponseWriter, r *http.Request) {
 	// 設定 CORS
 	s.setCORSHeaders(w, r)
 

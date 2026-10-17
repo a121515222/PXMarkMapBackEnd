@@ -6,6 +6,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -20,11 +23,30 @@ type StoreData struct {
 	StoreName            string
 	OkraShipments        []Shipment
 	SpongeGourdShipments []Shipment
+	ProductShipments     map[string][]Shipment
 	// 地點資訊
 	PlaceID          string
 	FormattedAddress string
 	Latitude         float64
 	Longitude        float64
+}
+
+func (s *StoreData) AddShipment(sheetName string, shipment Shipment) {
+	if s.ProductShipments == nil {
+		s.ProductShipments = make(map[string][]Shipment)
+	}
+	if sheetName == "" {
+		return
+	}
+
+	s.ProductShipments[sheetName] = append(s.ProductShipments[sheetName], shipment)
+
+	switch sheetName {
+	case "秋葵":
+		s.OkraShipments = append(s.OkraShipments, shipment)
+	case "產銷絲瓜":
+		s.SpongeGourdShipments = append(s.SpongeGourdShipments, shipment)
+	}
 }
 
 // 抓單個 CSV
@@ -55,26 +77,156 @@ func LoadSheetByGID(sheetID, gid string) ([][]string, error) {
 }
 
 // 抓所有 sheet 並整理
-func LoadAndOrganizeSheets() (map[string]*StoreData, error) {
-	sheetID := os.Getenv("GOOGLE_SHEET_ID")
-	gidsEnv := os.Getenv("GOOGLE_SHEET_GIDS")   // 例如 "0,123456789"
-	namesEnv := os.Getenv("GOOGLE_SHEET_NAMES") // 對應名稱 "秋葵,產銷絲瓜"
+type sheetConfig struct {
+	GID  string
+	Name string
+}
 
-	if sheetID == "" || gidsEnv == "" || namesEnv == "" {
-		return nil, fmt.Errorf("GOOGLE_SHEET_ID or GOOGLE_SHEET_GIDS or GOOGLE_SHEET_NAMES not set")
+func getSheetConfigsFromEnv() ([]sheetConfig, error) {
+	if gidsEnv := strings.TrimSpace(os.Getenv("GOOGLE_SHEET_GIDS")); gidsEnv != "" {
+		namesEnv := strings.TrimSpace(os.Getenv("GOOGLE_SHEET_NAMES"))
+		if namesEnv == "" {
+			return nil, fmt.Errorf("GOOGLE_SHEET_NAMES is required when GOOGLE_SHEET_GIDS is configured")
+		}
+
+		gids := splitCSV(gidsEnv)
+		names := splitCSV(namesEnv)
+		if len(gids) != len(names) {
+			return nil, fmt.Errorf("GOOGLE_SHEET_GIDS count and GOOGLE_SHEET_NAMES count do not match")
+		}
+
+		configs := make([]sheetConfig, 0, len(gids))
+		for i := range gids {
+			configs = append(configs, sheetConfig{GID: gids[i], Name: names[i]})
+		}
+		return configs, nil
 	}
 
-	gids := strings.Split(gidsEnv, ",")
-	names := strings.Split(namesEnv, ",")
-	if len(gids) != len(names) {
-		return nil, fmt.Errorf("GIDs count and Names count do not match")
+	indexedConfigs, err := getIndexedSheetConfigsFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	if len(indexedConfigs) > 0 {
+		return indexedConfigs, nil
+	}
+
+	return nil, fmt.Errorf("Google Sheet configuration not found: set GOOGLE_SHEET_ID with GOOGLE_SHEET_GIDS/GOOGLE_SHEET_NAMES or GOOGLE_SHEET_1_GID + GOOGLE_SHEET_1_NAME")
+}
+
+func getIndexedSheetConfigsFromEnv() ([]sheetConfig, error) {
+	indexed := make(map[int]sheetConfig)
+	for _, env := range os.Environ() {
+		parts := strings.SplitN(env, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		if value == "" {
+			continue
+		}
+
+		index, kind, ok := parseIndexedSheetKey(key)
+		if !ok {
+			continue
+		}
+
+		config := indexed[index]
+		switch kind {
+		case "GID", "ID":
+			config.GID = value
+		case "NAME", "SHEET_NAME", "TITLE":
+			config.Name = value
+		}
+		indexed[index] = config
+	}
+
+	if len(indexed) == 0 {
+		return nil, nil
+	}
+
+	keys := make([]int, 0, len(indexed))
+	for idx := range indexed {
+		keys = append(keys, idx)
+	}
+	sort.Ints(keys)
+
+	configs := make([]sheetConfig, 0, len(keys))
+	for _, idx := range keys {
+		cfg := indexed[idx]
+		if cfg.GID == "" || cfg.Name == "" {
+			continue
+		}
+		configs = append(configs, cfg)
+	}
+
+	if len(configs) == 0 {
+		return nil, fmt.Errorf("Sheet index env vars were found, but no complete GID + NAME pairs were configured")
+	}
+
+	return configs, nil
+}
+
+func parseIndexedSheetKey(key string) (int, string, bool) {
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`^GOOGLE_SHEET_(\d+)_(ID|GID|NAME|SHEET_NAME|TITLE)$`),
+		regexp.MustCompile(`^GOOGLE_SHEET_(ID|GID|NAME|SHEET_NAME|TITLE)_(\d+)$`),
+	}
+
+	for _, pattern := range patterns {
+		matches := pattern.FindStringSubmatch(key)
+		if len(matches) != 3 {
+			continue
+		}
+
+		if idx, err := strconv.Atoi(matches[1]); err == nil {
+			return idx, strings.ToUpper(matches[2]), true
+		}
+		if idx, err := strconv.Atoi(matches[2]); err == nil {
+			return idx, strings.ToUpper(matches[1]), true
+		}
+	}
+
+	return 0, "", false
+}
+
+func splitCSV(value string) []string {
+	items := strings.Split(value, ",")
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func LoadAndOrganizeSheets() (map[string]*StoreData, error) {
+	sheetID := strings.TrimSpace(os.Getenv("GOOGLE_SHEET_ID"))
+	if sheetID == "" {
+		return nil, fmt.Errorf("GOOGLE_SHEET_ID is required")
+	}
+
+	sheetConfigs, err := getSheetConfigsFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	if len(sheetConfigs) == 0 {
+		return nil, fmt.Errorf("no Google Sheet config found")
 	}
 
 	storeMap := make(map[string]*StoreData)
 
-	for i, gid := range gids {
-		sheetName := strings.TrimSpace(names[i])
-		records, err := LoadSheetByGID(sheetID, strings.TrimSpace(gid))
+	for _, config := range sheetConfigs {
+		sheetName := strings.TrimSpace(config.Name)
+		gid := strings.TrimSpace(config.GID)
+		if sheetName == "" || gid == "" {
+			continue
+		}
+
+		records, err := LoadSheetByGID(sheetID, gid)
 		if err != nil {
 			log.Printf("failed to load sheet %s: %v\n", sheetName, err)
 			continue
@@ -99,11 +251,7 @@ func LoadAndOrganizeSheets() (map[string]*StoreData, error) {
 				qty := row[k]
 
 				shipment := Shipment{Date: date, Qty: qty}
-				if sheetName == "秋葵" {
-					storeMap[storeName].OkraShipments = append(storeMap[storeName].OkraShipments, shipment)
-				} else if sheetName == "產銷絲瓜" {
-					storeMap[storeName].SpongeGourdShipments = append(storeMap[storeName].SpongeGourdShipments, shipment)
-				}
+				storeMap[storeName].AddShipment(sheetName, shipment)
 			}
 		}
 	}

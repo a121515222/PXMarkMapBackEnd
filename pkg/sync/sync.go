@@ -115,22 +115,33 @@ func convertToStoreInfo(storeMap map[string]*google.StoreData) []database.StoreI
 	var stores []database.StoreInfo
 
 	for _, data := range storeMap {
-		// 轉換秋葵出貨紀錄
-		var okraShipments []database.ShipmentInfo
-		for _, s := range data.OkraShipments {
-			okraShipments = append(okraShipments, database.ShipmentInfo{
-				Date: s.Date,
-				Qty:  s.Qty,
-			})
+		productShipments := make(map[string][]database.ShipmentInfo)
+		for sheetName, shipments := range data.ProductShipments {
+			for _, s := range shipments {
+				productShipments[sheetName] = append(productShipments[sheetName], database.ShipmentInfo{
+					Date: s.Date,
+					Qty:  s.Qty,
+				})
+			}
 		}
 
-		// 轉換絲瓜出貨紀錄
-		var gourdShipments []database.ShipmentInfo
+		if len(productShipments) == 0 {
+			for _, s := range data.OkraShipments {
+				productShipments["秋葵"] = append(productShipments["秋葵"], database.ShipmentInfo{Date: s.Date, Qty: s.Qty})
+			}
+			for _, s := range data.SpongeGourdShipments {
+				productShipments["產銷絲瓜"] = append(productShipments["產銷絲瓜"], database.ShipmentInfo{Date: s.Date, Qty: s.Qty})
+			}
+		}
+
+		okraShipments := make([]database.ShipmentInfo, 0, len(data.OkraShipments))
+		for _, s := range data.OkraShipments {
+			okraShipments = append(okraShipments, database.ShipmentInfo{Date: s.Date, Qty: s.Qty})
+		}
+
+		gourdShipments := make([]database.ShipmentInfo, 0, len(data.SpongeGourdShipments))
 		for _, s := range data.SpongeGourdShipments {
-			gourdShipments = append(gourdShipments, database.ShipmentInfo{
-				Date: s.Date,
-				Qty:  s.Qty,
-			})
+			gourdShipments = append(gourdShipments, database.ShipmentInfo{Date: s.Date, Qty: s.Qty})
 		}
 
 		stores = append(stores, database.StoreInfo{
@@ -139,6 +150,7 @@ func convertToStoreInfo(storeMap map[string]*google.StoreData) []database.StoreI
 			FormattedAddress: data.FormattedAddress,
 			Latitude:         data.Latitude,
 			Longitude:        data.Longitude,
+			ProductShipments: productShipments,
 			OkraShipments:    okraShipments,
 			GourdShipments:   gourdShipments,
 		})

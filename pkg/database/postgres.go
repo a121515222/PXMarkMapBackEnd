@@ -45,6 +45,7 @@ type StoreInfo struct {
 	FormattedAddress string
 	Latitude         float64
 	Longitude        float64
+	ProductShipments map[string][]ShipmentInfo
 	OkraShipments    []ShipmentInfo
 	GourdShipments   []ShipmentInfo
 }
@@ -83,17 +84,27 @@ func SaveStores(db *sql.DB, stores []StoreInfo) error {
 			return fmt.Errorf("儲存店家 %s 失敗: %v", store.StoreName, err)
 		}
 
-		// 儲存秋葵出貨紀錄
-		for _, shipment := range store.OkraShipments {
-			if err := saveShipment(tx, storeID, "秋葵", shipment); err != nil {
-				log.Printf("儲存秋葵出貨紀錄失敗: %v", err)
+		for productType, shipments := range store.ProductShipments {
+			for _, shipment := range shipments {
+				if err := saveShipment(tx, storeID, productType, shipment); err != nil {
+					log.Printf("儲存 %s 出貨紀錄失敗: %v", productType, err)
+				}
 			}
 		}
 
-		// 儲存絲瓜出貨紀錄
-		for _, shipment := range store.GourdShipments {
-			if err := saveShipment(tx, storeID, "產銷絲瓜", shipment); err != nil {
-				log.Printf("儲存絲瓜出貨紀錄失敗: %v", err)
+		if len(store.ProductShipments) == 0 {
+			// 儲存秋葵出貨紀錄
+			for _, shipment := range store.OkraShipments {
+				if err := saveShipment(tx, storeID, "秋葵", shipment); err != nil {
+					log.Printf("儲存秋葵出貨紀錄失敗: %v", err)
+				}
+			}
+
+			// 儲存絲瓜出貨紀錄
+			for _, shipment := range store.GourdShipments {
+				if err := saveShipment(tx, storeID, "產銷絲瓜", shipment); err != nil {
+					log.Printf("儲存絲瓜出貨紀錄失敗: %v", err)
+				}
 			}
 		}
 
