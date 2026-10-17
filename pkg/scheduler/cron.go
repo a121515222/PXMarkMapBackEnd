@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -177,6 +179,13 @@ func (s *Scheduler) runSync(isFullSync bool) {
 		syncErr = sync.SyncDataDaily(s.DB) // 每日同步
 	}
 
+	cleanupDays := GetRetentionDays()
+	if deleted, cleanupErr := s.CleanupExpiredShipments(cleanupDays); cleanupErr != nil {
+		log.Printf("[WARN] 清理過期出貨資料失敗: %v", cleanupErr)
+	} else {
+		log.Printf("[INFO] 已清理 %d 筆超過 %d 天的出貨資料", deleted, cleanupDays)
+	}
+
 	endTime := time.Now()
 	duration := endTime.Sub(startTime)
 
@@ -192,6 +201,50 @@ func (s *Scheduler) runSync(isFullSync bool) {
 	}
 
 	log.Println(strings.Repeat("=", 50))
+}
+
+func getRetentionDays() int {
+	value := strings.TrimSpace(os.Getenv("SHIPMENT_RETENTION_DAYS"))
+	if value == "" {
+		return 30
+	}
+
+	days, err := strconv.Atoi(value)
+	if err != nil || days <= 0 {
+		log.Printf("[WARN] SHIPMENT_RETENTION_DAYS=%q 無效，使用預設值 30", value)
+		return 30
+	}
+
+	return days
+}
+
+// GetRetentionDays 取得設定的保留天數。
+func GetRetentionDays() int {
+	return getRetentionDays()
+}
+
+// CleanupExpiredShipments 刪除超過保留天數的出貨資料。
+func (s *Scheduler) CleanupExpiredShipments(days int) (int64, error) {
+	if days <= 0 {
+		days = 30
+	}
+
+	query := `
+		DELETE FROM shipments
+		WHERE shipment_date < CURRENT_DATE - ($1::int * INTERVAL '1 day')
+	`
+
+	result, err := s.DB.Exec(query, days)
+	if err != nil {
+		return 0, err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	return rowsAffected, nil
 }
 
 // LogSyncStart 記錄同步開始

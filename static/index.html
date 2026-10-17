@@ -248,6 +248,15 @@
             </button>
         </div>
 
+        <!-- 清理舊資料區塊 -->
+        <div class="sync-section">
+            <h3>🧹 清除舊出貨資料</h3>
+            <p>依照 SHIPMENT_RETENTION_DAYS 設定值，自動刪除 N 天前的出貨資料</p>
+            <button class="btn-secondary full-width-btn" id="cleanupBtn" onclick="triggerCleanup()">
+                清除 N 天前資料
+            </button>
+        </div>
+
         <!-- 測試連線 -->
         <button class="btn-secondary full-width-btn" onclick="testConnection()">
             測試 API 連線
@@ -303,6 +312,51 @@
 
         async function triggerMonthlySync() {
             await triggerSync('monthly', 'monthlySyncBtn');
+        }
+
+        async function triggerCleanup() {
+            const apiUrl = document.getElementById('apiUrl').value.trim();
+            const secretKey = document.getElementById('secretKey').value.trim();
+            const cleanupBtn = document.getElementById('cleanupBtn');
+
+            if (!apiUrl) {
+                showStatus('請輸入 API 伺服器位址', 'error');
+                return;
+            }
+
+            if (!secretKey) {
+                showStatus('請輸入同步密鑰', 'error');
+                return;
+            }
+
+            cleanupBtn.disabled = true;
+            cleanupBtn.innerHTML = '<span class="loading"></span>清除中...';
+            hideStatus();
+            showStatus('正在清除 N 天前的出貨資料...', 'info');
+
+            try {
+                const response = await fetch(`${apiUrl}/api/cleanupShipments`, {
+                    method: 'POST',
+                    headers: {
+                        'X-Sync-Secret': secretKey,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    showStatus(`✅ ${data.message || '清理任務已成功觸發！'}`, 'success');
+                } else if (response.status === 401) {
+                    showStatus('❌ 密鑰錯誤，請檢查 SYNC_SECRET 是否正確', 'error');
+                } else {
+                    showStatus(`❌ 清理失敗: HTTP ${response.status}`, 'error');
+                }
+            } catch (error) {
+                showStatus(`❌ 請求失敗: ${error.message}`, 'error');
+            } finally {
+                cleanupBtn.disabled = false;
+                cleanupBtn.innerHTML = '清除 N 天前資料';
+            }
         }
 
         async function triggerSync(syncType, buttonId) {

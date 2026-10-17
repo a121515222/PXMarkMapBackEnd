@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"PXMarkMapBackEnd/pkg/database"
+	"PXMarkMapBackEnd/pkg/scheduler"
 	"PXMarkMapBackEnd/pkg/sync"
 )
 
@@ -97,7 +98,9 @@ func (s *Server) Start() error {
 
 	if s.EnableSync {
 		http.HandleFunc("/api/triggerSync", s.handleTriggerSync)
+		http.HandleFunc("/api/cleanupShipments", s.handleTriggerCleanup)
 		log.Printf("[INFO] 手動同步端點: http://localhost:%s/api/triggerSync", s.Port)
+		log.Printf("[INFO] 清理出貨資料端點: http://localhost:%s/api/cleanupShipments", s.Port)
 		log.Printf("[INFO] 同步端點已啟用（需要密鑰驗證）")
 	} else {
 		log.Printf("[WARN] 手動同步端點已停用")
@@ -180,8 +183,8 @@ func (s *Server) setCORSHeaders(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Sync-Secret")
 	w.Header().Set("Content-Type", "application/json")
 }
 
@@ -288,4 +291,49 @@ func (s *Server) handleTriggerSync(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(response)
 	log.Printf("[INFO] 已回應%s請求，同步任務在背景執行中", syncTypeText)
+}
+
+func (s *Server) handleTriggerCleanup(w http.ResponseWriter, r *http.Request) {
+	s.setCORSHeaders(w, r)
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed. Use POST.", http.StatusMethodNotAllowed)
+		return
+	}
+
+	secret := r.Header.Get("X-Sync-Secret")
+	if secret == "" {
+		secret = r.URL.Query().Get("secret")
+	}
+	if secret != s.SyncSecret {
+		log.Printf("[WARN] 清理請求被拒絕：密鑰錯誤")
+		http.Error(w, "Unauthorized: Invalid secret", http.StatusUnauthorized)
+		return
+	}
+
+	retentionDays := scheduler.GetRetentionDays()
+	log.Printf("[INFO] 收到手動清理請求（密鑰驗證通過），將清除 %d 天前資料", retentionDays)
+
+	go func() {
+		deleted, err := scheduler.NewScheduler(s.DB, 0).CleanupExpiredShipments(retentionDays)
+		if err != nil {
+			log.Printf("[ERROR] 清理超過 %d 天的出貨資料失敗: %v", retentionDays, err)
+			return
+		}
+		log.Printf("[INFO] 手動清理完成，已刪除 %d 筆超過 %d 天的出貨資料", deleted, retentionDays)
+	}()
+
+	response := map[string]string{
+		"status":  "triggered",
+		"message": fmt.Sprintf("清理任務已觸發，將清除 %d 天前的出貨資料", retentionDays),
+	}
+
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(response)
+	log.Printf("[INFO] 已回應清理請求，清理任務在背景執行中")
 }
